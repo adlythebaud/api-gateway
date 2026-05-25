@@ -89,7 +89,7 @@ DECISIONS.md      # Architectural decisions and trade-offs
 - [x] API key auth
 
 ### Stretch Features
-- [ ] Circuit breaker
+- [x] Circuit breaker
 - [ ] Request/response header transforms
 - [ ] Load balancing (round robin / weighted)
 - [ ] Body transforms

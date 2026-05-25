@@ -5,6 +5,7 @@ import logging
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+from gateway.circuit_breaker import CircuitBreakerRegistry
 from gateway.config import Config, RouteConfig
 from gateway.proxy import ProxyRequest, forward_request
 from gateway.rate_limiter import RateLimiterRegistry
@@ -20,6 +21,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
     config: Config
     router: Router
     rate_limiters: RateLimiterRegistry
+    circuit_breakers: CircuitBreakerRegistry
     start_time: float
 
     def do_GET(self):
@@ -69,7 +71,22 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._log_request(client_ip, route.path, 429, start)
             return
 
+        breaker = self.circuit_breakers.get(route.path)
+        if breaker:
+            allowed, error_body = breaker.allow()
+            if not allowed:
+                self._send_json(503, error_body)
+                self._log_request(client_ip, route.path, 503, start)
+                return
+
         status = self._proxy(route)
+
+        if breaker:
+            if status >= 500:
+                breaker.record_failure()
+            else:
+                breaker.record_success()
+
         self._log_request(client_ip, route.path, status, start)
 
     def _log_request(self, client_ip: str, route_path: str | None, status: int, start: float):
@@ -129,10 +146,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 proxy_resp = forward_request(upstream_url, proxy_req, timeout)
         except TimeoutError:
             self._send_json(504, {"error": "upstream_timeout"})
-            return 504
+            return 504  # caller records failure via circuit breaker
         except ConnectionError:
             self._send_json(502, {"error": "upstream_unreachable"})
-            return 502
+            return 502  # caller records failure via circuit breaker
 
         # Send upstream response back to client
         self.send_response(proxy_resp.status)
@@ -176,5 +193,6 @@ def create_server(config: Config) -> HTTPServer:
     GatewayHandler.config = config
     GatewayHandler.router = Router(config.routes)
     GatewayHandler.rate_limiters = RateLimiterRegistry(config.gateway.global_rate_limit, config.routes)
+    GatewayHandler.circuit_breakers = CircuitBreakerRegistry(config.routes)
     GatewayHandler.start_time = time.time()
     return HTTPServer(("", config.gateway.port), GatewayHandler)
