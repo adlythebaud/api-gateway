@@ -5,6 +5,7 @@ import time
 from http.server import HTTPServer
 
 from gateway.config import Config, GatewayConfig
+from gateway.rate_limiter import RateLimiterRegistry
 from gateway.router import Router
 from gateway.server import GatewayHandler
 
@@ -23,6 +24,7 @@ def make_gateway(config: Config | None = None) -> tuple[HTTPServer, str]:
     handler = type("TestHandler", (GatewayHandler,), {
         "config": config,
         "router": Router(config.routes),
+        "rate_limiters": RateLimiterRegistry(config.gateway.global_rate_limit, config.routes),
         "start_time": time.time(),
     })
 

@@ -7,6 +7,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from gateway.config import Config, RouteConfig
 from gateway.proxy import ProxyRequest, forward_request
+from gateway.rate_limiter import RateLimiterRegistry
 from gateway.router import Router
 
 logger = logging.getLogger("gatewaykit")
@@ -17,6 +18,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     config: Config
     router: Router
+    rate_limiters: RateLimiterRegistry
     start_time: float
 
     def do_GET(self):
@@ -52,6 +54,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if self.command not in route.methods:
             self._send_json(405, {"error": "method_not_allowed"})
             self._log_request(client_ip, route.path, 405, start)
+            return
+
+        if not self.rate_limiters.check(route.path, client_ip):
+            self._send_json(429, {"error": "rate_limit_exceeded"})
+            self._log_request(client_ip, route.path, 429, start)
             return
 
         status = self._proxy(route)
@@ -157,5 +164,6 @@ def create_server(config: Config) -> HTTPServer:
     setup_logging()
     GatewayHandler.config = config
     GatewayHandler.router = Router(config.routes)
+    GatewayHandler.rate_limiters = RateLimiterRegistry(config.gateway.global_rate_limit, config.routes)
     GatewayHandler.start_time = time.time()
     return HTTPServer(("", config.gateway.port), GatewayHandler)
