@@ -7,6 +7,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from gateway.circuit_breaker import CircuitBreakerRegistry
 from gateway.config import Config, RouteConfig
+from gateway.health_check import start_health_checks
+from gateway.load_balancer import LoadBalancerRegistry
 from gateway.proxy import ProxyRequest, forward_request
 from gateway.rate_limiter import RateLimiterRegistry
 from gateway.retry import forward_with_retry
@@ -23,6 +25,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
     router: Router
     rate_limiters: RateLimiterRegistry
     circuit_breakers: CircuitBreakerRegistry
+    load_balancers: LoadBalancerRegistry
     start_time: float
 
     def do_GET(self):
@@ -107,9 +110,12 @@ class GatewayHandler(BaseHTTPRequestHandler):
         # Determine upstream URL
         upstream_url = route.upstream.url
         if not upstream_url:
-            # Load balancing not implemented yet — use first target
-            if route.upstream.targets:
-                upstream_url = route.upstream.targets[0].url
+            balancer = self.load_balancers.get(route.path)
+            if balancer:
+                upstream_url = balancer.next()
+                if not upstream_url:
+                    self._send_json(503, {"error": "no_healthy_upstreams"})
+                    return 503
             else:
                 self._send_json(502, {"error": "no_upstream_configured"})
                 return 502
@@ -204,5 +210,7 @@ def create_server(config: Config) -> HTTPServer:
     GatewayHandler.router = Router(config.routes)
     GatewayHandler.rate_limiters = RateLimiterRegistry(config.gateway.global_rate_limit, config.routes)
     GatewayHandler.circuit_breakers = CircuitBreakerRegistry(config.routes)
+    GatewayHandler.load_balancers = LoadBalancerRegistry(config.routes)
     GatewayHandler.start_time = time.time()
+    start_health_checks(config.routes, GatewayHandler.load_balancers)
     return HTTPServer(("", config.gateway.port), GatewayHandler)

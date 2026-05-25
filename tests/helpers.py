@@ -6,6 +6,7 @@ from http.server import HTTPServer
 
 from gateway.circuit_breaker import CircuitBreakerRegistry
 from gateway.config import Config, GatewayConfig
+from gateway.load_balancer import LoadBalancerRegistry
 from gateway.rate_limiter import RateLimiterRegistry
 from gateway.router import Router
 from gateway.server import GatewayHandler
@@ -27,6 +28,7 @@ def make_gateway(config: Config | None = None) -> tuple[HTTPServer, str]:
         "router": Router(config.routes),
         "rate_limiters": RateLimiterRegistry(config.gateway.global_rate_limit, config.routes),
         "circuit_breakers": CircuitBreakerRegistry(config.routes),
+        "load_balancers": LoadBalancerRegistry(config.routes),
         "start_time": time.time(),
     })
 

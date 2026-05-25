@@ -53,8 +53,10 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
             headers_dict = {}
             for key in self.headers:
                 headers_dict[key] = self.headers[key]
+            port = self.server.server_address[1]
             self._respond(200, {
                 "message": "ok",
+                "upstream_port": port,
                 "method": self.command,
                 "path": self.path,
                 "headers": headers_dict,
