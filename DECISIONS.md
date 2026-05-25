@@ -52,6 +52,10 @@ Rate limit state is stored in-memory using dictionaries protected by `threading.
 
 Concurrency is critical here — the spec explicitly calls out 50 simultaneous requests hitting a rate-limited route. Lock granularity is per-route to avoid global contention.
 
+### Data Storage: In-Memory Only
+
+All gateway state (rate limit counters, circuit breaker status, health check results) is stored in-memory. No database is required for this scope. If the gateway needed to survive restarts without losing state or share state across multiple gateway instances, I would add a persistent data store — likely Postgres running in a Docker container — to back the rate limiter and circuit breaker. For now, in-memory is simpler, faster, and has zero infrastructure dependencies.
+
 ### Timeouts
 
 Duration strings like `"30s"` and `"1s"` are parsed into numeric seconds at config load time. Route-level `timeout` overrides the `global_timeout`. Timeouts are enforced on upstream HTTP requests.

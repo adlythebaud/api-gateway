@@ -65,31 +65,38 @@ Tests are written alongside each feature, not batched at the end. Every step sho
 
 Features that demonstrate production thinking and are relatively quick to implement correctly.
 
-### 2.1 — Rate Limiting (Fixed Window)
+### 2.1 — Request Logging
+- Log each incoming request: method, path, matched route, response status, duration
+- Use Python's `logging` module with a structured format
+- Log at INFO level for normal requests, WARN for 4xx, ERROR for 5xx
+- Include client IP and timestamp
+- Suppress logs during tests to keep output clean
+
+### 2.2 — Rate Limiting (Fixed Window)
 - In-memory counters keyed by IP (or global)
 - Fixed window: counter resets after window expires
 - Return `429 Too Many Requests` when limit exceeded
 - Route-level rate limits override global rate limit
 - Thread-safe — must handle concurrent requests correctly
 
-### 2.2 — Rate Limiting (Sliding Window)
+### 2.3 — Rate Limiting (Sliding Window)
 - Sliding window using timestamp log approach
 - Count requests within a rolling window from the current time
 - Same override/key semantics as fixed window
 
-### 2.3 — Retry with Backoff
+### 2.4 — Retry with Backoff
 - Retry upstream requests on configured status codes (e.g., 502, 503, 504)
 - Support `fixed` and `exponential` backoff strategies
 - Respect `attempts` count and `initial_delay`
 - Per-route configuration
 
-### 2.4 — Auth (API Key)
+### 2.5 — Auth (API Key)
 - Check for required header (e.g., `X-API-Key`)
 - Validate against list of allowed keys
 - Return `401 Unauthorized` if missing or invalid
 - Quick win — straightforward header check
 
-### 2.5 — Tests for Phase 2
+### 2.6 — Tests for Phase 2
 Each feature above includes its own tests as it's built. Key scenarios:
 - Rate limiting under concurrent load (threading), verify 429 responses, test both strategies across different config values
 - Retry behavior with flaky mock upstream, verify attempt counts and backoff timing
