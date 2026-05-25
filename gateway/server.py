@@ -57,6 +57,13 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._log_request(client_ip, route.path, 405, start)
             return
 
+        if route.auth:
+            key = self.headers.get(route.auth.header)
+            if not key or key not in route.auth.keys:
+                self._send_json(401, {"error": "unauthorized"})
+                self._log_request(client_ip, route.path, 401, start)
+                return
+
         if not self.rate_limiters.check(route.path, client_ip):
             self._send_json(429, {"error": "rate_limit_exceeded"})
             self._log_request(client_ip, route.path, 429, start)

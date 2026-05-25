@@ -17,6 +17,16 @@ uv sync
 ## Running the Gateway
 
 ```bash
+# Quickstart: start mock upstreams + gateway together
+./scripts/dev.sh
+
+# Or with a custom config
+./scripts/dev.sh tests/configs/multi_route.yaml
+```
+
+You can also run them separately:
+
+```bash
 # Pass a config file as a CLI argument
 uv run gatewaykit gateway.yaml
 
@@ -24,14 +34,45 @@ uv run gatewaykit gateway.yaml
 uv run python -m gateway gateway.yaml
 ```
 
-Then, in a second terminal, try hitting the API (these examples use the provided `gateway.yaml`):
+### Running with Mock Upstreams
+
+The easiest way is the dev script, which starts mock upstreams and the gateway together:
 
 ```bash
-curl http://localhost:8080/health                        # 200, healthy
-curl http://localhost:8080/api/unknown                   # 404
-curl -X DELETE http://localhost:8080/api/users           # 405 (only GET/POST allowed)
-curl http://localhost:8080/api/users                     # 502 (no upstream yet)
+# Terminal 1: Start everything
+./scripts/dev.sh
+
+# Terminal 2: Hit the API (use -i to see status codes and headers)
+curl -i http://localhost:8080/health                        # 200, healthy
+curl -i http://localhost:8080/api/users                     # 200, proxied to mock upstream
+curl -i http://localhost:8080/api/unknown                   # 404
+curl -i -X DELETE http://localhost:8080/api/users           # 405 (only GET/POST allowed)
 ```
+
+Or run them separately — the provided `gateway.yaml` routes to upstream services on ports 3001–3006:
+
+```bash
+# Terminal 1: Start mock upstreams on ports 3001–3006
+uv run python scripts/mock_upstream.py
+
+# Terminal 2: Start the gateway
+uv run gatewaykit gateway.yaml
+
+# Terminal 3: Hit the API
+curl -i http://localhost:8080/health
+curl -i http://localhost:8080/api/users
+```
+
+You can also start mock upstreams on specific ports only:
+
+```bash
+uv run python scripts/mock_upstream.py 3001 3002
+```
+
+The mock upstream echoes back request details (method, path, headers, body) and supports special paths:
+- `/healthz` — returns 200 OK
+- `/slow` — returns 200 after a 10s delay
+- `/flaky` — always returns 503
 
 ## Running Tests
 
@@ -44,6 +85,7 @@ uv run pytest
 ```
 gateway/          # Main gateway package
 tests/            # Test suite
+scripts/          # Helper scripts (mock upstream, etc.)
 docs/             # Planning and design docs
 gateway.yaml      # Example gateway config
 DECISIONS.md      # Architectural decisions and trade-offs
@@ -60,10 +102,10 @@ DECISIONS.md      # Architectural decisions and trade-offs
 - [x] Strip prefix
 
 ### High-Value Features
-- [ ] Rate limiting (fixed window)
-- [ ] Rate limiting (sliding window)
-- [ ] Retry with backoff
-- [ ] API key auth
+- [x] Rate limiting (fixed window)
+- [x] Rate limiting (sliding window)
+- [x] Retry with backoff
+- [x] API key auth
 
 ### Stretch Features
 - [ ] Circuit breaker
