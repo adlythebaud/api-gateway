@@ -27,6 +27,18 @@ Request → Router → [Auth] → [Rate Limiter] → [Request Transform] → Pro
 
 Each middleware is optional and constructed from the route's config. Adding a new feature means writing a new middleware — no changes to existing code required. This is the single most important architectural decision because it determines how extensible the gateway is.
 
+### Server: stdlib `http.server` with Class-Level State
+
+The gateway uses Python's `http.server.HTTPServer` and `BaseHTTPRequestHandler`. Config and start time are set as class attributes on the handler, avoiding global state. Each request handler instance reads from the shared class-level config. This is simple, requires no dependencies, and is sufficient for the gateway's needs. The `ThreadingHTTPServer` variant or a thread pool can be swapped in later if needed for concurrency.
+
+### Health Endpoint: Always Available
+
+`GET /health` is handled before route matching — it returns `{"status": "healthy", "uptime_seconds": <int>}` regardless of what routes are configured. This is hardcoded behavior, not config-driven, per the spec requirement.
+
+### YAML `on:` Key Quirk
+
+YAML parses bare `on:` as the boolean `True`. The retry config parser checks for both the string key `"on"` and the boolean key `True` to handle this transparently, so config authors don't need to quote the key.
+
 ### Routing: Prefix Matching with Longest-First Ordering
 
 Routes are matched by prefix (e.g., `/api/users` matches `/api/users/123`). Routes are sorted longest-first at startup to prevent ambiguous matches — `/api/users/admin` will match before `/api/users`.

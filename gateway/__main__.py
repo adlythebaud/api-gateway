@@ -3,6 +3,7 @@ import sys
 import yaml
 
 from gateway.config import get_config_path, load_config
+from gateway.server import create_server
 
 
 def main():
@@ -19,6 +20,14 @@ def main():
     print(f"  Routes: {len(config.routes)}")
     for route in config.routes:
         print(f"    {route.methods} {route.path} -> {route.upstream.url or 'load-balanced'}")
+
+    server = create_server(config)
+    print(f"GatewayKit listening on port {config.gateway.port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        server.server_close()
 
 
 if __name__ == "__main__":
