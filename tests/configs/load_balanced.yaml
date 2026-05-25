@@ -1,0 +1,21 @@
+gateway:
+  port: 7070
+
+routes:
+  - path: "/api/data"
+    methods: ["GET"]
+    strip_prefix: true
+    upstream:
+      targets:
+        - url: "http://localhost:7001"
+          weight: 5
+        - url: "http://localhost:7002"
+          weight: 3
+        - url: "http://localhost:7003"
+          weight: 2
+      balance: "weighted_round_robin"
+      timeout: "5s"
+    health_check:
+      path: "/health"
+      interval: "10s"
+      unhealthy_threshold: 2

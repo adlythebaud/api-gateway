@@ -1,0 +1,34 @@
+gateway:
+  port: 8080
+  global_timeout: "15s"
+  global_rate_limit:
+    requests: 50
+    window: "30s"
+    strategy: "sliding_window"
+    per: "global"
+
+routes:
+  - path: "/v1/users"
+    methods: ["GET", "POST", "DELETE"]
+    strip_prefix: false
+    upstream:
+      url: "http://localhost:5001"
+      timeout: "3s"
+    rate_limit:
+      requests: 20
+      window: "10s"
+      strategy: "fixed_window"
+      per: "ip"
+
+  - path: "/v1/items"
+    methods: ["GET"]
+    strip_prefix: true
+    upstream:
+      url: "http://localhost:5002"
+
+  - path: "/v1/items/special"
+    methods: ["GET", "POST"]
+    strip_prefix: false
+    upstream:
+      url: "http://localhost:5003"
+      timeout: "1s"

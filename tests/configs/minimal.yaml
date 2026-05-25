@@ -1,0 +1,8 @@
+gateway:
+  port: 9090
+
+routes:
+  - path: "/api/hello"
+    methods: ["GET"]
+    upstream:
+      url: "http://localhost:4001"
