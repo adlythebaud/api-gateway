@@ -50,10 +50,14 @@ class MockUpstreamHandler(BaseHTTPRequestHandler):
             code = int(self.path.split("/status/")[1])
             self._respond(code, {"status": code})
         else:
+            headers_dict = {}
+            for key in self.headers:
+                headers_dict[key] = self.headers[key]
             self._respond(200, {
                 "message": "ok",
                 "method": self.command,
                 "path": self.path,
+                "headers": headers_dict,
             })
 
     def _respond(self, status: int, body: dict):

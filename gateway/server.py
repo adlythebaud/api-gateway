@@ -11,6 +11,7 @@ from gateway.proxy import ProxyRequest, forward_request
 from gateway.rate_limiter import RateLimiterRegistry
 from gateway.retry import forward_with_retry
 from gateway.router import Router
+from gateway.transforms import apply_request_header_transform, apply_response_header_transform
 
 logger = logging.getLogger("gatewaykit")
 
@@ -129,6 +130,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
         for key in self.headers:
             headers[key] = self.headers[key]
 
+        # Apply request header transforms
+        if route.request_transform:
+            headers = apply_request_header_transform(headers, route.request_transform)
+
         # Determine timeout: route-level overrides global
         timeout = route.upstream.timeout or self.config.gateway.global_timeout
 
@@ -151,9 +156,14 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._send_json(502, {"error": "upstream_unreachable"})
             return 502  # caller records failure via circuit breaker
 
+        # Apply response header transforms
+        resp_headers = proxy_resp.headers
+        if route.response_transform:
+            resp_headers = apply_response_header_transform(resp_headers, route.response_transform, route.path)
+
         # Send upstream response back to client
         self.send_response(proxy_resp.status)
-        for key, value in proxy_resp.headers.items():
+        for key, value in resp_headers.items():
             self.send_header(key, value)
         self.end_headers()
         self.wfile.write(proxy_resp.body)

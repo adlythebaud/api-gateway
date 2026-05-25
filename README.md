@@ -90,7 +90,7 @@ DECISIONS.md      # Architectural decisions and trade-offs
 
 ### Stretch Features
 - [x] Circuit breaker
-- [ ] Request/response header transforms
+- [x] Request/response header transforms
 - [ ] Load balancing (round robin / weighted)
 - [ ] Body transforms
 - [ ] Health checks
