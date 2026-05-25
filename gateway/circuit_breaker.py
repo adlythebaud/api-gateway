@@ -24,6 +24,7 @@ class CircuitBreaker:
         self._state = State.CLOSED
         self._failures: list[float] = []  # timestamps of failures within the window
         self._tripped_at: float = 0.0
+        self._probe_started_at: float = 0.0
 
     @property
     def state(self) -> State:
@@ -46,6 +47,7 @@ class CircuitBreaker:
                 if elapsed >= self.cooldown:
                     # Cooldown expired — transition to half-open, allow one probe
                     self._state = State.HALF_OPEN
+                    self._probe_started_at = now
                     return True, None
                 else:
                     retry_after = int(self.cooldown - elapsed) + 1
@@ -56,6 +58,10 @@ class CircuitBreaker:
 
             if self._state == State.HALF_OPEN:
                 # Only one probe at a time — reject others while probing
+                # If probe has been in flight too long, allow a new one
+                if now - self._probe_started_at > self.cooldown:
+                    self._probe_started_at = now
+                    return True, None
                 return False, {
                     "error": "service_unavailable",
                     "retry_after": 1,

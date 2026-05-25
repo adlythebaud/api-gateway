@@ -43,10 +43,23 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         self._handle()
 
+    # Maximum request body size: 10 MB
+    MAX_BODY_SIZE = 10 * 1024 * 1024
+
     def _handle(self):
         start = time.time()
         client_ip = self.client_address[0]
 
+        try:
+            self._handle_inner(client_ip, start)
+        except Exception:
+            logger.exception(f"{client_ip} {self.command} {self.path} — unhandled exception")
+            try:
+                self._send_json(500, {"error": "internal_server_error"})
+            except Exception:
+                pass
+
+    def _handle_inner(self, client_ip: str, start: float):
         if self.path == "/health":
             self._health()
             self._log_request(client_ip, None, 200, start)
@@ -128,7 +141,16 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 forward_path = "/"
 
         # Read request body
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            self._send_json(400, {"error": "invalid_content_length"})
+            return 400
+
+        if content_length > self.MAX_BODY_SIZE:
+            self._send_json(413, {"error": "request_body_too_large"})
+            return 413
+
         body = self.rfile.read(content_length) if content_length > 0 else b""
 
         # Build headers dict from request

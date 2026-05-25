@@ -16,12 +16,17 @@ class FixedWindowLimiter:
         self._lock = threading.Lock()
         # bucket_key -> (count, window_start)
         self._buckets: dict[str, tuple[int, float]] = {}
+        self._last_cleanup = time.time()
 
     def allow(self, client_ip: str) -> bool:
         key = client_ip if self.per == "ip" else "__global__"
         now = time.time()
 
         with self._lock:
+            # Periodically prune stale buckets to prevent memory leak
+            if now - self._last_cleanup > self.window * 2:
+                self._cleanup(now)
+
             count, window_start = self._buckets.get(key, (0, now))
 
             # Window expired — reset
@@ -35,6 +40,13 @@ class FixedWindowLimiter:
             self._buckets[key] = (count + 1, window_start)
             return True
 
+    def _cleanup(self, now: float):
+        """Remove buckets whose windows have expired. Called under lock."""
+        stale = [k for k, (_, start) in self._buckets.items() if now - start >= self.window * 2]
+        for k in stale:
+            del self._buckets[k]
+        self._last_cleanup = now
+
 
 class SlidingWindowLimiter:
     """Sliding window rate limiter. Tracks individual request timestamps."""
@@ -46,6 +58,7 @@ class SlidingWindowLimiter:
         self._lock = threading.Lock()
         # bucket_key -> list of timestamps
         self._buckets: dict[str, list[float]] = {}
+        self._last_cleanup = time.time()
 
     def allow(self, client_ip: str) -> bool:
         key = client_ip if self.per == "ip" else "__global__"
@@ -53,6 +66,10 @@ class SlidingWindowLimiter:
         cutoff = now - self.window
 
         with self._lock:
+            # Periodically prune empty buckets to prevent memory leak
+            if now - self._last_cleanup > self.window * 2:
+                self._cleanup(cutoff)
+
             timestamps = self._buckets.get(key, [])
 
             # Prune expired timestamps
@@ -65,6 +82,13 @@ class SlidingWindowLimiter:
             timestamps.append(now)
             self._buckets[key] = timestamps
             return True
+
+    def _cleanup(self, cutoff: float):
+        """Remove buckets with no active timestamps. Called under lock."""
+        stale = [k for k, ts in self._buckets.items() if not ts or ts[-1] <= cutoff]
+        for k in stale:
+            del self._buckets[k]
+        self._last_cleanup = time.time()
 
 
 def create_limiter(config: RateLimitConfig) -> FixedWindowLimiter | SlidingWindowLimiter:

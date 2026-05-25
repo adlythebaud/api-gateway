@@ -117,6 +117,38 @@ Background daemon threads ping each upstream target's health endpoint on a confi
 
 The gateway must work with any valid config following the schema, not just the provided example. Config parsing uses typed structures (dataclasses) with sensible defaults, and the router/middleware pipeline is constructed dynamically from whatever routes are present.
 
+## Production Hardening
+
+A self-code-review identified 7 critical/high-severity issues. All were fixed:
+
+### 1. Unhandled exceptions crash the handler
+**Problem:** Any unhandled exception in `_handle()` (e.g., malformed headers) would kill the request handler thread with no response to the client.
+**Fix:** Wrapped the entire request flow in a try/except. Unhandled exceptions now log a full traceback and return `500 Internal Server Error` instead of crashing.
+
+### 2. Malformed Content-Length crashes the handler
+**Problem:** `int(self.headers.get("Content-Length", 0))` raises `ValueError` on non-numeric values like `"abc"`. A malicious client could crash handlers at will.
+**Fix:** Wrapped in try/except, returns `400 Bad Request` for non-numeric Content-Length.
+
+### 3. No max body size limit
+**Problem:** A client sending `Content-Length: 1073741824` (1 GB) would cause the gateway to allocate 1 GB of memory. Multiple concurrent large requests exhaust memory.
+**Fix:** Added a 10 MB `MAX_BODY_SIZE` limit. Requests exceeding it get `413 Request Body Too Large` before any data is read.
+
+### 4. Rate limiter memory leak
+**Problem:** The rate limiter bucket dictionaries grow unbounded — one entry per unique client IP, never cleaned up. Under sustained traffic from many IPs, memory grows linearly until OOM.
+**Fix:** Added periodic cleanup in both `FixedWindowLimiter` and `SlidingWindowLimiter`. Stale buckets (not accessed in `2 * window`) are pruned during the next `allow()` call. Cleanup runs under the existing lock, so no additional contention.
+
+### 5. Upstream response read can hang forever
+**Problem:** `http.client` timeout only applies to connection establishment. If the upstream accepts the connection but sends the response body slowly (or never), `resp.read()` blocks the thread indefinitely. Under load, this exhausts all handler threads.
+**Fix:** After `conn.request()`, explicitly set `conn.sock.settimeout(timeout)` to enforce the same timeout on the response read. `socket.timeout` is caught and raised as `TimeoutError`.
+
+### 6. Health checker race condition
+**Problem:** `HealthChecker._check()` and `_record_failure()` both read and write `_healthy` and `_consecutive_failures` without synchronization. Two concurrent calls could lose a failure increment or produce inconsistent state.
+**Fix:** Added a `threading.Lock` to `HealthChecker`. All reads/writes to `_healthy` and `_consecutive_failures` are now protected. Also narrowed the exception catch from bare `except Exception` to `except (OSError, http.client.HTTPException, socket.timeout)` and added `try/finally` on the connection to ensure `conn.close()` always runs.
+
+### 7. Circuit breaker probe timeout race
+**Problem:** If a half-open probe request hangs for longer than the cooldown period, the breaker stays in HALF_OPEN indefinitely — no new probes are allowed, and the circuit never recovers.
+**Fix:** Track `_probe_started_at` separately. If a probe has been in flight longer than the cooldown, allow a new probe through. This prevents a hanging probe from permanently blocking recovery.
+
 ## What I'd Build Next (Given More Time)
 
 In priority order:

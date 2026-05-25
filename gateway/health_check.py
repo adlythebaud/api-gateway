@@ -2,6 +2,7 @@
 
 import http.client
 import logging
+import socket
 import threading
 import time
 import urllib.parse
@@ -26,6 +27,7 @@ class HealthChecker:
         self.config = config
         self._on_healthy = on_healthy
         self._on_unhealthy = on_unhealthy
+        self._lock = threading.Lock()
         self._consecutive_failures = 0
         self._healthy = True
         self._stop = threading.Event()
@@ -46,31 +48,35 @@ class HealthChecker:
         parsed = urllib.parse.urlparse(self.target_url)
         try:
             conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
-            conn.request("GET", self.config.path)
-            resp = conn.getresponse()
-            resp.read()
-            conn.close()
+            try:
+                conn.request("GET", self.config.path)
+                resp = conn.getresponse()
+                resp.read()
+            finally:
+                conn.close()
 
             if 200 <= resp.status < 400:
-                self._consecutive_failures = 0
-                if not self._healthy:
-                    self._healthy = True
-                    self._on_healthy(self.target_url)
-                    logger.info(f"Health check: {self.target_url} is healthy again")
+                with self._lock:
+                    self._consecutive_failures = 0
+                    if not self._healthy:
+                        self._healthy = True
+                self._on_healthy(self.target_url)
+                logger.info(f"Health check: {self.target_url} is healthy again")
             else:
                 self._record_failure()
-        except Exception:
+        except (OSError, http.client.HTTPException, socket.timeout):
             self._record_failure()
 
     def _record_failure(self):
-        self._consecutive_failures += 1
-        if self._consecutive_failures >= self.config.unhealthy_threshold and self._healthy:
-            self._healthy = False
-            self._on_unhealthy(self.target_url)
-            logger.warning(
-                f"Health check: {self.target_url} marked unhealthy "
-                f"after {self._consecutive_failures} consecutive failures"
-            )
+        with self._lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self.config.unhealthy_threshold and self._healthy:
+                self._healthy = False
+                self._on_unhealthy(self.target_url)
+                logger.warning(
+                    f"Health check: {self.target_url} marked unhealthy "
+                    f"after {self._consecutive_failures} consecutive failures"
+                )
 
 
 def start_health_checks(

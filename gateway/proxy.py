@@ -1,6 +1,7 @@
 """Reverse proxy logic for GatewayKit. Forwards requests to upstream services."""
 
 import http.client
+import socket
 import urllib.parse
 from dataclasses import dataclass, field
 
@@ -64,6 +65,10 @@ def forward_request(
             forward_headers["Host"] = f"{parsed.hostname}:{parsed.port}"
 
         conn.request(request.method, full_path, body=request.body, headers=forward_headers)
+
+        # Enforce timeout on the full response read, not just connection
+        conn.sock.settimeout(timeout)
+
         resp = conn.getresponse()
 
         # Read response headers, filtering hop-by-hop
@@ -77,7 +82,9 @@ def forward_request(
 
         return ProxyResponse(status=resp.status, headers=resp_headers, body=body)
 
-    except TimeoutError:
+    except (TimeoutError, TimeoutError):
         raise
+    except socket.timeout as e:
+        raise TimeoutError(f"Upstream {upstream_url} read timed out") from e
     except OSError as e:
         raise ConnectionError(f"Failed to connect to upstream {upstream_url}: {e}") from e
