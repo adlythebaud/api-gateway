@@ -8,6 +8,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from gateway.config import Config, RouteConfig
 from gateway.proxy import ProxyRequest, forward_request
 from gateway.rate_limiter import RateLimiterRegistry
+from gateway.retry import forward_with_retry
 from gateway.router import Router
 
 logger = logging.getLogger("gatewaykit")
@@ -115,7 +116,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
         )
 
         try:
-            proxy_resp = forward_request(upstream_url, proxy_req, timeout)
+            if route.retry:
+                proxy_resp = forward_with_retry(upstream_url, proxy_req, timeout, route.retry)
+            else:
+                proxy_resp = forward_request(upstream_url, proxy_req, timeout)
         except TimeoutError:
             self._send_json(504, {"error": "upstream_timeout"})
             return 504
