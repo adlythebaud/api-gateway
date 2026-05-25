@@ -60,6 +60,22 @@ All gateway state (rate limit counters, circuit breaker status, health check res
 
 Duration strings like `"30s"` and `"1s"` are parsed into numeric seconds at config load time. Route-level `timeout` overrides the `global_timeout`. Timeouts are enforced on upstream HTTP requests.
 
+### Request Logging
+
+Every request is logged with client IP, method, path, matched route, status code, and duration in milliseconds. Log levels are based on status: INFO for 2xx/3xx, WARNING for 4xx, ERROR for 5xx. Uses Python's standard `logging` module with a named `gatewaykit` logger, which makes it easy to configure log levels or add handlers externally. Logs are suppressed during tests via `conftest.py`.
+
+### Retry with Backoff
+
+Retry is opt-in per route. When configured, the gateway retries upstream requests on specific status codes (e.g., 502, 503, 504). Two backoff strategies are supported: `fixed` (constant delay) and `exponential` (delay doubles each attempt). Connection errors are also retried. The retry logic lives in its own module (`gateway/retry.py`) and wraps the existing `forward_request` function — no changes to the proxy layer were needed.
+
+### API Key Auth
+
+Auth is a simple header check — if a route has `auth` configured, the gateway checks for the specified header and validates it against the list of allowed keys. Returns 401 if missing or invalid. Auth runs before rate limiting in the pipeline so that unauthenticated requests don't consume rate limit quota. Routes without auth config are unaffected — extra headers are simply forwarded to the upstream.
+
+### Standalone Mode
+
+The `--standalone` flag auto-detects all upstream ports from the config and starts mock upstreams on them. This means `uv run gatewaykit gateway.yaml --standalone` works out of the box with any config file, no hardcoded ports or separate scripts needed. The mock upstream logic lives in `gateway/standalone.py` and is only imported when the flag is present, keeping the production code path clean.
+
 ### Config Generality
 
 The gateway must work with any valid config following the schema, not just the provided example. Config parsing uses typed structures (dataclasses) with sensible defaults, and the router/middleware pipeline is constructed dynamically from whatever routes are present.
@@ -67,11 +83,13 @@ The gateway must work with any valid config following the schema, not just the p
 ## What I'd Build Next (Given More Time)
 
 In priority order:
-1. **Body transforms** — JSON restructuring with dot-notation mapping, response envelopes
-2. **Health checks** — Background thread pinging upstreams, removing unhealthy targets from rotation
-3. **Graceful shutdown** — Drain in-flight requests before stopping
-4. **Structured logging** — Request IDs, latency tracking, upstream status
-5. **Config hot-reload** — Watch `gateway.yaml` for changes, rebuild the pipeline without restart
+1. **Circuit breaker** — Trip after N failures, return 503 with retry_after, half-open probing
+2. **Request/response header transforms** — Add/remove headers with dynamic values ($request_time, etc.)
+3. **Load balancing** — Round robin and weighted round robin across multiple upstream targets
+4. **Body transforms** — JSON restructuring with dot-notation mapping, response envelopes
+5. **Health checks** — Background thread pinging upstreams, removing unhealthy targets from rotation
+6. **Graceful shutdown** — Drain in-flight requests before stopping
+7. **Config hot-reload** — Watch `gateway.yaml` for changes, rebuild the pipeline without restart
 
 ## AI Tool Usage
 

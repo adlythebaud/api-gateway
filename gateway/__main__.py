@@ -7,6 +7,10 @@ from gateway.server import create_server
 
 
 def main():
+    standalone = "--standalone" in sys.argv
+    if standalone:
+        sys.argv.remove("--standalone")
+
     config_path = get_config_path()
 
     try:
@@ -21,8 +25,13 @@ def main():
     for route in config.routes:
         print(f"    {route.methods} {route.path} -> {route.upstream.url or 'load-balanced'}")
 
+    if standalone:
+        from gateway.standalone import start_mock_upstreams
+        servers = start_mock_upstreams(config)
+        print(f"  Standalone mode: {len(servers)} mock upstream(s) started\n")
+
     server = create_server(config)
-    print(f"GatewayKit listening on port {config.gateway.port}")
+    print(f"GatewayKit listening on port {config.gateway.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

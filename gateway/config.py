@@ -276,6 +276,8 @@ def get_config_path() -> str:
     if env_path:
         return env_path
 
-    print("Usage: gatewaykit <config.yaml>", file=sys.stderr)
+    print("Usage: gatewaykit <config.yaml> [--standalone]", file=sys.stderr)
     print("   or: GATEWAY_CONFIG=<config.yaml> gatewaykit", file=sys.stderr)
+    print("\nOptions:", file=sys.stderr)
+    print("  --standalone  Start mock upstreams for all ports in the config", file=sys.stderr)
     sys.exit(1)
