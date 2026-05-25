@@ -8,24 +8,45 @@ Dependencies will be kept minimal: `pyyaml` for config parsing, standard library
 
 ## Feature Prioritization
 
-Features are ordered by a combination of:
-1. **Core requirement status** — the 5 non-negotiable requirements come first
-2. **Architectural leverage** — features that force good abstractions early (e.g., middleware pipeline) are prioritized over isolated features
-3. **Complexity-to-value ratio** — API key auth is a 15-minute feature that demonstrates production thinking; body transforms are complex and niche
+Features were prioritized using three criteria:
 
-The full ordering is documented in `docs/plan.md`.
+1. **Core requirement status** — the 5 non-negotiable requirements (start on port 8080, health endpoint, basic proxying, method filtering, config generality) came first. These are the foundation everything else builds on.
+2. **Architectural leverage** — features that force good abstractions early were prioritized over isolated features. For example, rate limiting was built early because it established the pattern of per-route middleware with a registry, which circuit breaker and auth later followed.
+3. **Complexity-to-value ratio** — quick wins that demonstrate production thinking were prioritized over complex niche features. API key auth is a straightforward header check but shows the gateway handles security. Body transforms require deep JSON restructuring for a narrow use case, so they were deprioritized.
+
+**The actual build order was:**
+1. Config parsing → Health endpoint → Router → Reverse proxy → Strip prefix (core requirements)
+2. Request logging (observability for everything that follows)
+3. Rate limiting (fixed + sliding window — establishes the middleware registry pattern)
+4. Retry with backoff (resilience, builds on the proxy layer)
+5. API key auth (security, quick win)
+6. Circuit breaker (resilience, follows the registry pattern from rate limiting)
+7. Header transforms (request/response modification)
+8. Load balancing + health checks (these are coupled — health checks remove targets from the load balancer)
+
+**What was deprioritized:** Body transforms (request body mapping and response envelopes) were left for last because they're the most complex feature with the narrowest use case. The gateway works fully without them.
+
+The full phased plan is documented in `docs/plan.md`.
 
 ## Key Design Decisions
 
 ### Middleware Pipeline Architecture
 
-Almost every feature in the config (rate limiting, auth, transforms, circuit breaker) is a middleware that wraps the core proxy handler. The request flows through a chain:
+Almost every feature in the config (rate limiting, auth, transforms, circuit breaker) is a middleware step that runs before or after the core proxy handler. The request flows through a chain:
 
 ```
-Request → Router → [Auth] → [Rate Limiter] → [Request Transform] → Proxy → [Retry] → [Response Transform] → Client
+Request → Router → [Auth] → [Rate Limiter] → [Circuit Breaker] → [Request Transform] → Proxy/[Retry] → [Response Transform] → Client
 ```
 
-Each middleware is optional and constructed from the route's config. Adding a new feature means writing a new middleware — no changes to existing code required. This is the single most important architectural decision because it determines how extensible the gateway is.
+Each step is optional and only runs if the route's config enables it. The ordering is deliberate:
+- **Auth before rate limiting** — unauthenticated requests don't consume rate limit quota
+- **Rate limiting before circuit breaker** — rate-limited requests don't count as upstream failures
+- **Circuit breaker before proxy** — if the circuit is open, we fail fast without touching the upstream
+- **Retry wraps the proxy call** — retries are transparent to the rest of the pipeline
+
+**Extensibility:** Adding a new feature means writing a new module (e.g., `gateway/new_feature.py`), adding a registry class if it needs per-route state, and inserting a check in `_handle()` or `_proxy()`. No existing code needs to change. For example, adding IP allowlisting would be a new check after routing and before auth — one `if` block and one new module.
+
+**Trade-offs:** The pipeline is implemented as sequential `if` checks in the handler rather than a composable middleware chain (like Go's `http.Handler` wrapping). This is simpler to read and debug but means the ordering is hardcoded in `server.py`. For this scope that's the right call — a fully composable pipeline adds indirection without enough benefit for ~7 middleware steps. If the gateway grew to 20+ middleware, refactoring to a chain pattern would be warranted.
 
 ### Server: stdlib `http.server` with Class-Level State
 
