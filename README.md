@@ -51,16 +51,21 @@ DECISIONS.md      # Architectural decisions and trade-offs
 
 ## Implemented Features
 
+### Core Features
 - [x] Config parsing (YAML → typed structures)
 - [x] Health endpoint (`GET /health`)
 - [x] Route matching with prefix support
 - [x] Method filtering (405 on mismatch)
 - [x] Reverse proxy (forward to upstream)
 - [x] Strip prefix
+
+### High-Value Features
 - [ ] Rate limiting (fixed window)
 - [ ] Rate limiting (sliding window)
 - [ ] Retry with backoff
 - [ ] API key auth
+
+### Stretch Features
 - [ ] Circuit breaker
 - [ ] Request/response header transforms
 - [ ] Load balancing (round robin / weighted)

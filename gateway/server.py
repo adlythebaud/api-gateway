@@ -1,12 +1,15 @@
 """HTTP server for GatewayKit."""
 
 import json
+import logging
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from gateway.config import Config, RouteConfig
 from gateway.proxy import ProxyRequest, forward_request
 from gateway.router import Router
+
+logger = logging.getLogger("gatewaykit")
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
@@ -32,22 +35,42 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self._handle()
 
     def _handle(self):
+        start = time.time()
+        client_ip = self.client_address[0]
+
         if self.path == "/health":
             self._health()
+            self._log_request(client_ip, None, 200, start)
             return
 
         route = self.router.match(self.path)
         if route is None:
             self._send_json(404, {"error": "not_found"})
+            self._log_request(client_ip, None, 404, start)
             return
 
         if self.command not in route.methods:
             self._send_json(405, {"error": "method_not_allowed"})
+            self._log_request(client_ip, route.path, 405, start)
             return
 
-        self._proxy(route)
+        status = self._proxy(route)
+        self._log_request(client_ip, route.path, status, start)
 
-    def _proxy(self, route: RouteConfig):
+    def _log_request(self, client_ip: str, route_path: str | None, status: int, start: float):
+        duration_ms = (time.time() - start) * 1000
+        route_str = route_path or "-"
+        msg = f"{client_ip} {self.command} {self.path} -> {route_str} | {status} | {duration_ms:.1f}ms"
+
+        if status >= 500:
+            logger.error(msg)
+        elif status >= 400:
+            logger.warning(msg)
+        else:
+            logger.info(msg)
+
+    def _proxy(self, route: RouteConfig) -> int:
+        """Proxy the request to upstream. Returns the response status code."""
         # Determine upstream URL
         upstream_url = route.upstream.url
         if not upstream_url:
@@ -56,7 +79,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 upstream_url = route.upstream.targets[0].url
             else:
                 self._send_json(502, {"error": "no_upstream_configured"})
-                return
+                return 502
 
         # Determine the path to forward
         forward_path = self.path
@@ -88,10 +111,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
             proxy_resp = forward_request(upstream_url, proxy_req, timeout)
         except TimeoutError:
             self._send_json(504, {"error": "upstream_timeout"})
-            return
+            return 504
         except ConnectionError:
             self._send_json(502, {"error": "upstream_unreachable"})
-            return
+            return 502
 
         # Send upstream response back to client
         self.send_response(proxy_resp.status)
@@ -99,6 +122,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self.send_header(key, value)
         self.end_headers()
         self.wfile.write(proxy_resp.body)
+        return proxy_resp.status
 
     def _health(self):
         uptime = int(time.time() - self.start_time)
@@ -113,12 +137,24 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def log_message(self, format, *args):
-        # Suppress default stderr logging during tests; can be overridden later
+        # Suppress BaseHTTPRequestHandler's default stderr logging
         pass
+
+
+def setup_logging():
+    """Configure the gatewaykit logger with a structured format."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 def create_server(config: Config) -> HTTPServer:
     """Create and return an HTTPServer configured with the gateway handler."""
+    setup_logging()
     GatewayHandler.config = config
     GatewayHandler.router = Router(config.routes)
     GatewayHandler.start_time = time.time()
