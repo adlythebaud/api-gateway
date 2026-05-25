@@ -76,6 +76,22 @@ Auth is a simple header check — if a route has `auth` configured, the gateway 
 
 The `--standalone` flag auto-detects all upstream ports from the config and starts mock upstreams on them. This means `uv run gatewaykit gateway.yaml --standalone` works out of the box with any config file, no hardcoded ports or separate scripts needed. The mock upstream logic lives in `gateway/standalone.py` and is only imported when the flag is present, keeping the production code path clean.
 
+### Circuit Breaker
+
+The circuit breaker uses three states: closed (normal), open (rejecting), and half-open (probing). Failures are tracked per-route with timestamps — only failures within the configured window count toward the threshold. When tripped, the gateway returns `503 { "error": "service_unavailable", "retry_after": <seconds> }` immediately without contacting the upstream. After the cooldown, one probe request is allowed through. If it succeeds, the circuit closes; if it fails, it re-opens. Connection errors and timeouts also count as failures, not just 5xx responses.
+
+### Request/Response Header Transforms
+
+Transforms are applied as two steps in the proxy pipeline: request transforms run after building the headers dict but before forwarding, and response transforms run after receiving the upstream response but before sending to the client. Header removal is case-insensitive. Dynamic values (`$request_time`, `$response_time`, `$route_path`) are resolved at request time. This is stateless — no shared state or locking needed.
+
+### Load Balancing
+
+The load balancer builds a target sequence at startup: for round robin it's the target list as-is, for weighted round robin it expands targets by weight (e.g., weights [3,1] become [A,A,A,B]). Selection cycles through the healthy subset of this sequence. This approach is simple, deterministic, and thread-safe with a single lock. The trade-off is that weight changes require a restart, but that's acceptable since the config is loaded once at startup.
+
+### Health Checks
+
+Background daemon threads ping each upstream target's health endpoint on a configurable interval. After `unhealthy_threshold` consecutive failures, the target is removed from the load balancer's healthy set. When a health check succeeds after being unhealthy, the target is restored. Health checkers are only started for routes that have both `health_check` config and multiple upstream targets — single-URL routes don't need them.
+
 ### Config Generality
 
 The gateway must work with any valid config following the schema, not just the provided example. Config parsing uses typed structures (dataclasses) with sensible defaults, and the router/middleware pipeline is constructed dynamically from whatever routes are present.
@@ -83,13 +99,11 @@ The gateway must work with any valid config following the schema, not just the p
 ## What I'd Build Next (Given More Time)
 
 In priority order:
-1. **Circuit breaker** — Trip after N failures, return 503 with retry_after, half-open probing
-2. **Request/response header transforms** — Add/remove headers with dynamic values ($request_time, etc.)
-3. **Load balancing** — Round robin and weighted round robin across multiple upstream targets
-4. **Body transforms** — JSON restructuring with dot-notation mapping, response envelopes
-5. **Health checks** — Background thread pinging upstreams, removing unhealthy targets from rotation
-6. **Graceful shutdown** — Drain in-flight requests before stopping
-7. **Config hot-reload** — Watch `gateway.yaml` for changes, rebuild the pipeline without restart
+1. **Body transforms** — JSON restructuring with dot-notation mapping, response envelopes
+2. **Graceful shutdown** — Drain in-flight requests before stopping
+3. **Config hot-reload** — Watch `gateway.yaml` for changes, rebuild the pipeline without restart
+4. **Request ID propagation** — Generate unique request IDs, pass through the pipeline for tracing
+5. **Metrics endpoint** — Expose request counts, latencies, and error rates per route
 
 ## AI Tool Usage
 
