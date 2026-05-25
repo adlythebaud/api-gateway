@@ -4,7 +4,8 @@ import json
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-from gateway.config import Config
+from gateway.config import Config, RouteConfig
+from gateway.proxy import ProxyRequest, forward_request
 from gateway.router import Router
 
 
@@ -44,8 +45,60 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._send_json(405, {"error": "method_not_allowed"})
             return
 
-        # TODO: proxy to upstream (Phase 1.5)
-        self._send_json(502, {"error": "not_implemented"})
+        self._proxy(route)
+
+    def _proxy(self, route: RouteConfig):
+        # Determine upstream URL
+        upstream_url = route.upstream.url
+        if not upstream_url:
+            # Load balancing not implemented yet — use first target
+            if route.upstream.targets:
+                upstream_url = route.upstream.targets[0].url
+            else:
+                self._send_json(502, {"error": "no_upstream_configured"})
+                return
+
+        # Determine the path to forward
+        forward_path = self.path
+        if route.strip_prefix:
+            forward_path = self.path[len(route.path):]
+            if not forward_path:
+                forward_path = "/"
+
+        # Read request body
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length > 0 else b""
+
+        # Build headers dict from request
+        headers = {}
+        for key in self.headers:
+            headers[key] = self.headers[key]
+
+        # Determine timeout: route-level overrides global
+        timeout = route.upstream.timeout or self.config.gateway.global_timeout
+
+        proxy_req = ProxyRequest(
+            method=self.command,
+            path=forward_path,
+            headers=headers,
+            body=body,
+        )
+
+        try:
+            proxy_resp = forward_request(upstream_url, proxy_req, timeout)
+        except TimeoutError:
+            self._send_json(504, {"error": "upstream_timeout"})
+            return
+        except ConnectionError:
+            self._send_json(502, {"error": "upstream_unreachable"})
+            return
+
+        # Send upstream response back to client
+        self.send_response(proxy_resp.status)
+        for key, value in proxy_resp.headers.items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(proxy_resp.body)
 
     def _health(self):
         uptime = int(time.time() - self.start_time)

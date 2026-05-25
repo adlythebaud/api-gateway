@@ -24,6 +24,15 @@ uv run gatewaykit gateway.yaml
 uv run python -m gateway gateway.yaml
 ```
 
+Then, in a second terminal, try hitting the API (these examples use the provided `gateway.yaml`):
+
+```bash
+curl http://localhost:8080/health                        # 200, healthy
+curl http://localhost:8080/api/unknown                   # 404
+curl -X DELETE http://localhost:8080/api/users           # 405 (only GET/POST allowed)
+curl http://localhost:8080/api/users                     # 502 (no upstream yet)
+```
+
 ## Running Tests
 
 ```bash
@@ -42,12 +51,12 @@ DECISIONS.md      # Architectural decisions and trade-offs
 
 ## Implemented Features
 
-- [ ] Config parsing (YAML → typed structures)
-- [ ] Health endpoint (`GET /health`)
-- [ ] Route matching with prefix support
-- [ ] Method filtering (405 on mismatch)
-- [ ] Reverse proxy (forward to upstream)
-- [ ] Strip prefix
+- [x] Config parsing (YAML → typed structures)
+- [x] Health endpoint (`GET /health`)
+- [x] Route matching with prefix support
+- [x] Method filtering (405 on mismatch)
+- [x] Reverse proxy (forward to upstream)
+- [x] Strip prefix
 - [ ] Rate limiting (fixed window)
 - [ ] Rate limiting (sliding window)
 - [ ] Retry with backoff
